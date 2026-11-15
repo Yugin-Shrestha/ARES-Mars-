@@ -80,6 +80,38 @@ const NASA_MODEL_MAP: Record<string, string> = {
 const MAX_TILE_CACHE = 800;
 const VERCEL_SAFE_BODY_BYTES = 4 * 1024 * 1024; // Stay under Vercel's 4.5 MB serverless payload limit
 
+function makeFallbackMarsTileSvg(message: string): string {
+  return `
+    <svg xmlns="http://www.w3.org/2000/svg" width="512" height="256" viewBox="0 0 512 256">
+      <defs>
+        <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stop-color="#3d2a24"/>
+          <stop offset="45%" stop-color="#7a4936"/>
+          <stop offset="100%" stop-color="#2f1d1a"/>
+        </linearGradient>
+      </defs>
+      <rect width="512" height="256" fill="url(#bg)"/>
+      <circle cx="128" cy="84" r="54" fill="rgba(255,220,185,0.08)"/>
+      <circle cx="354" cy="112" r="72" fill="rgba(255,210,170,0.08)"/>
+      <circle cx="220" cy="178" r="42" fill="rgba(255,200,150,0.06)"/>
+      <g opacity="0.15" stroke="#f7d7b5" stroke-width="2">
+        <path d="M40 60 Q110 30 170 56 T314 64 T470 50" fill="none"/>
+        <path d="M30 155 Q120 120 210 160 T350 140 T470 170" fill="none"/>
+      </g>
+      <text x="256" y="128" font-family="Arial, sans-serif" font-size="18" text-anchor="middle" fill="#fce8d2" opacity="0.9">Mars fallback imagery</text>
+      <text x="256" y="156" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#f0d2b5" opacity="0.8">${message}</text>
+    </svg>
+  `.trim();
+}
+
+function sendFallbackMarsTile(res: any, message: string) {
+  const svg = makeFallbackMarsTileSvg(message);
+  res.setHeader('Content-Type', 'image/svg+xml');
+  res.setHeader('Cache-Control', 'public, max-age=3600, s-maxage=3600');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.status(200).send(svg);
+}
+
 function toHttpsUrl(url: string | null | undefined): string | null {
   if (!url) return null;
   return url.startsWith('http://') ? `https://${url.slice(7)}` : url;
@@ -114,9 +146,15 @@ export function createApiApp(): Express {
     next();
   });
 
-  const jsonCache = new Map<string, CacheEntry<unknown>>();
-  const tileCache = new Map<string, CacheEntry<Buffer>>();
-  const modelCache = new Map<string, { data: Buffer; expiresAt: number }>();
+  const globalStore = globalThis as typeof globalThis & {
+    __marsExplorerJsonCache?: Map<string, CacheEntry<unknown>>;
+    __marsExplorerTileCache?: Map<string, CacheEntry<Buffer>>;
+    __marsExplorerModelCache?: Map<string, { data: Buffer; expiresAt: number }>;
+  };
+
+  const jsonCache = globalStore.__marsExplorerJsonCache ??= new Map<string, CacheEntry<unknown>>();
+  const tileCache = globalStore.__marsExplorerTileCache ??= new Map<string, CacheEntry<Buffer>>();
+  const modelCache = globalStore.__marsExplorerModelCache ??= new Map<string, { data: Buffer; expiresAt: number }>();
 
   function setTileCache(key: string, buf: Buffer, contentType: string) {
     if (tileCache.size >= MAX_TILE_CACHE) {
@@ -195,7 +233,7 @@ export function createApiApp(): Express {
         headers: { 'User-Agent': 'MarsExplorer-ScientificClient/1.0' },
       });
       if (!response.ok) {
-        res.status(response.status).end();
+        sendFallbackMarsTile(res, 'NASA Mars Trek tile unavailable');
         return;
       }
       const contentType =
@@ -211,7 +249,7 @@ export function createApiApp(): Express {
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.send(buffer);
     } catch {
-      res.status(502).end();
+      sendFallbackMarsTile(res, 'Mars imagery unreachable');
     }
   });
 
@@ -243,7 +281,7 @@ export function createApiApp(): Express {
     try {
       const response = await fetch(targetUrl, { signal: AbortSignal.timeout(8000) });
       if (!response.ok) {
-        res.status(response.status).end();
+        sendFallbackMarsTile(res, 'USGS Mars tile unavailable');
         return;
       }
       const contentType = response.headers.get('content-type') || 'image/png';
@@ -257,7 +295,7 @@ export function createApiApp(): Express {
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.send(buffer);
     } catch {
-      res.status(502).end();
+      sendFallbackMarsTile(res, 'Mars imagery unreachable');
     }
   });
 
