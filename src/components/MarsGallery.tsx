@@ -42,6 +42,7 @@ export default function MarsGallery({ onClose }: MarsGalleryProps) {
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
 
   // Lightbox modal state
   const [selectedItem, setSelectedItem] = useState<NasaGalleryItem | null>(null);
@@ -69,6 +70,7 @@ export default function MarsGallery({ onClose }: MarsGalleryProps) {
           signal,
         });
         if (signal?.aborted) return;
+        setWarning(res.warning ?? null);
         setItems((prev) => {
           if (!append) return res.items;
           const seen = new Set(prev.map((x) => x.nasaId));
@@ -86,6 +88,7 @@ export default function MarsGallery({ onClose }: MarsGalleryProps) {
         setHasMore(res.hasMore);
       } catch (err) {
         if (signal?.aborted) return;
+        setWarning(null);
         setError(
           err instanceof Error ? err.message : 'Unable to load images from NASA Image Library.'
         );
@@ -209,6 +212,11 @@ export default function MarsGallery({ onClose }: MarsGalleryProps) {
         </div>
 
         {/* Search & Presets Toolbar */}
+        {(warning || error) && (
+          <div className="border-b border-amber-500/20 bg-amber-500/10 px-4 py-2 text-[11px] text-amber-100">
+            {warning || error}
+          </div>
+        )}
         <div className="border-b border-slate-800 bg-[#0D131E] px-4 py-3 space-y-2.5">
           <div className="flex flex-wrap items-center gap-2">
             <form onSubmit={handleSearchSubmit} className="relative flex flex-1 min-w-[220px] items-center">

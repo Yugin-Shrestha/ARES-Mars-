@@ -21,6 +21,7 @@ export interface NasaGalleryResponse {
   hasMore: boolean;
   items: NasaGalleryItem[];
   source: string;
+  warning?: string;
 }
 
 export interface NasaImageAssetResponse {

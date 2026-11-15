@@ -486,6 +486,30 @@ export function createApiApp(): Express {
       Math.min(48, Number.parseInt(String(req.query.page_size || '18'), 10) || 18)
     );
 
+    const fallbackItems: RawNasaImageItem[] = [
+      {
+        href: 'https://images-api.nasa.gov/asset/PIA25559',
+        data: [
+          {
+            nasa_id: 'PIA25559',
+            title: 'Mars Perseverance Jezero Crater',
+            description:
+              'Fallback Mars gallery image showing the Perseverance landing region in Jezero Crater.',
+            date_created: '2024-01-01',
+            center: 'NASA JPL',
+            keywords: ['Mars', 'Perseverance', 'Jezero'],
+          },
+        ],
+        links: [
+          {
+            href: 'https://mars.nasa.gov/system/resources/detail_files/29039_PIA25559-1200.jpg',
+            rel: 'preview',
+            render: 'image',
+          },
+        ],
+      },
+    ];
+
     const upstreamUrl = new URL('https://images-api.nasa.gov/search');
     upstreamUrl.searchParams.set('q', q);
     upstreamUrl.searchParams.set('media_type', 'image');
@@ -502,7 +526,7 @@ export function createApiApp(): Express {
       };
 
       const collection = raw.collection || {};
-      const rawItems = collection.items || [];
+      const rawItems = (collection.items || []).length > 0 ? collection.items || [] : fallbackItems;
       const totalHits = Number(collection.metadata?.total_hits ?? rawItems.length);
       const hasNextLink = Boolean(collection.links?.some((l) => l.rel === 'next'));
 
@@ -540,6 +564,11 @@ export function createApiApp(): Express {
         })
         .filter((x): x is NonNullable<typeof x> => x !== null);
 
+      const warning =
+        !NASA_API_KEY && !collection.items?.length
+          ? 'NASA_API_KEY is not configured. Gallery is showing a local fallback image until the key is added.'
+          : undefined;
+
       res.setHeader('Cache-Control', 'public, s-maxage=900, stale-while-revalidate=3600');
       res.json({
         query: q,
@@ -549,11 +578,45 @@ export function createApiApp(): Express {
         hasMore: hasNextLink || page * pageSize < totalHits,
         items,
         source: 'NASA Image and Video Library (images-api.nasa.gov)',
+        warning,
       });
     } catch (err) {
-      res.status(502).json({
-        error: 'Unable to fetch imagery from NASA Image and Video Library',
-        detail: err instanceof Error ? err.message : 'Upstream request failed',
+      const warning =
+        !NASA_API_KEY
+          ? 'NASA_API_KEY is not configured. The gallery is using a local fallback until the server key is added.'
+          : 'NASA image upstream is temporarily unavailable; the gallery is using a local fallback.';
+      res.status(200).json({
+        query: q,
+        page,
+        pageSize,
+        totalHits: 0,
+        hasMore: false,
+        items: fallbackItems
+          .map((item) => {
+            const d = item.data?.[0];
+            if (!d?.nasa_id) return null;
+            const preview = (item.links || []).find((l) => l.rel === 'preview') || (item.links || [])[0];
+            const thumbUrl = toHttpsUrl(preview?.href);
+            const previewUrl = toHttpsUrl(preview?.href);
+            if (!thumbUrl || !previewUrl) return null;
+            return {
+              nasaId: d.nasa_id,
+              title: d.title || d.nasa_id,
+              description: (d.description || 'Fallback Mars gallery image.').trim(),
+              dateCreated: d.date_created || '',
+              center: d.center || 'NASA',
+              photographer: d.photographer || d.secondary_creator || undefined,
+              keywords: Array.isArray(d.keywords) ? d.keywords.slice(0, 8) : [],
+              thumbUrl,
+              previewUrl,
+              assetManifestUrl: toHttpsUrl(item.href) || `https://images-api.nasa.gov/asset/${encodeURIComponent(d.nasa_id)}`,
+              source: 'Local fallback',
+              detailsUrl: `https://images.nasa.gov/details/${encodeURIComponent(d.nasa_id)}`,
+            };
+          })
+          .filter((x): x is NonNullable<typeof x> => x !== null),
+        source: 'Local Mars fallback',
+        warning,
       });
     }
   });
